@@ -10,91 +10,21 @@
     <script src="https://cdn.jsdelivr.net/npm/docxtemplater@3.37.11/build/docxtemplater.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/docx-preview@0.1.15/dist/docx-preview.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-
-    <style>
-        /* PDF Preview Modal Background */
-        #pdf-preview-modal {
-            background-color: rgba(0, 0, 0, 0.8);
-        }
-
-        /* --- V5 PRINT FIX: Ensure Document is Visible --- */
-        @media print {
-            /* 1. Hide the regular website body */
-            body > *:not(#pdf-preview-modal) { 
-                display: none !important; 
-            }
-
-            /* 2. Force the Modal Wrapper to be Visible and fill the page */
-            #pdf-preview-modal { 
-                display: block !important; 
-                position: absolute !important;
-                left: 0 !important;
-                top: 0 !important;
-                width: 100% !important;
-                height: auto !important;
-                background: white !important;
-                z-index: 99999 !important;
-                overflow: visible !important;
-            }
-
-            /* 3. Hide the Blue Header & Buttons inside the modal */
-            #modal-header-bar {
-                display: none !important;
-            }
-
-            /* 4. Force the content area to expand fully */
-            #pdf-preview-modal .overflow-auto,
-            #pdf-preview-modal .max-w-4xl {
-                overflow: visible !important;
-                max-width: none !important;
-                width: 100% !important;
-                height: auto !important;
-                box-shadow: none !important;
-                border: none !important;
-                margin: 0 !important;
-                padding: 0 !important;
-            }
-
-            /* 5. Ensure the document container is visible */
-            #pdf-render-container {
-                display: block !important;
-                padding: 0 !important;
-                margin: 0 !important;
-                box-shadow: none !important;
-            }
-        }
-    </style>
 </head>
 <body class="bg-gray-50 min-h-screen font-sans">
 
     <div id="notification-area" class="fixed top-5 right-5 z-50 flex flex-col gap-3"></div>
 
-    <div id="pdf-preview-modal" class="hidden fixed inset-0 z-[60] flex flex-col items-center justify-center p-4">
-        <div class="bg-white w-full max-w-4xl h-[90vh] rounded-xl shadow-2xl flex flex-col overflow-hidden">
-            
-            <div id="modal-header-bar" class="bg-blue-900 text-white p-4 flex justify-between items-center shadow-md shrink-0">
-                <h3 class="font-bold text-lg"><i class="fa-solid fa-print mr-2"></i>Print Preview</h3>
-                <div class="flex gap-3">
-                    <button onclick="triggerPrint()" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-bold transition shadow-lg flex items-center gap-2">
-                        <i class="fa-solid fa-file-pdf"></i> Save as PDF
-                    </button>
-                    <button onclick="closePreview()" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold transition shadow-lg">
-                        Close
-                    </button>
-                </div>
-            </div>
+    <div id="pdf-generator-container" style="position: absolute; left: -9999px; top: 0; width: 800px; background: white; padding: 40px;"></div>
 
-            <div class="flex-1 overflow-auto bg-gray-200 p-8" id="preview-scroll-area">
-                <div id="print-instruction" class="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-4 text-sm hidden">
-                    <p class="font-bold">How to save as PDF:</p>
-                    <p>1. Click the green button above.</p>
-                    <p>2. In the Destination dropdown, select <strong>"Save as PDF"</strong>.</p>
-                </div>
-                
-                <div id="pdf-render-container" class="bg-white shadow-lg mx-auto p-12 min-h-[1000px] text-gray-800"></div>
-            </div>
+    <div id="loading-overlay" class="hidden fixed inset-0 bg-black/50 z-[60] flex items-center justify-center backdrop-blur-sm">
+        <div class="bg-white p-8 rounded-xl shadow-2xl flex flex-col items-center">
+            <i class="fa-solid fa-circle-notch fa-spin text-4xl text-blue-600 mb-4"></i>
+            <h3 class="text-lg font-bold text-gray-800">Generating PDF...</h3>
+            <p class="text-gray-500 text-sm">Please wait, this may take a few seconds.</p>
         </div>
     </div>
 
@@ -140,7 +70,7 @@
                     <h3 class="font-bold mb-2">Tips:</h3>
                     <ul class="list-disc list-inside space-y-1">
                         <li>Make sure your Word tags use double brackets: <code class="bg-blue-100 px-1">&lt;&lt;Tag&gt;&gt;</code></li>
-                        <li><strong>For PDF:</strong> Use the preview window to check alignment, then click "Save as PDF".</li>
+                        <li><strong>PDF Mode:</strong> Now downloads the file directly! No print dialog needed.</li>
                     </ul>
                 </div>
             </div>
@@ -163,7 +93,7 @@
                                 </label>
                                 <label class="flex items-center gap-2 cursor-pointer">
                                     <input type="radio" name="outputFormat" value="pdf" class="w-4 h-4 text-red-600">
-                                    <span>PDF (Preview & Print)</span>
+                                    <span>PDF (Direct Download)</span>
                                 </label>
                             </div>
                         </div>
@@ -282,20 +212,23 @@
             if (!uploadedTemplateArrayBuffer) return showNotification("Please upload a template first!", "error");
 
             try {
+                // 1. Prepare Docxtemplater
                 const zip = new PizZip(uploadedTemplateArrayBuffer);
                 const doc = new docxtemplater(zip, {
                     paragraphLoop: true,
                     linebreaks: true,
-                    // Safety: Returns empty string if tag is missing in Word doc
                     nullGetter: () => { return ""; }
                 });
 
+                // 2. Gather Data
                 const formData = new FormData(event.target);
                 const data = {};
                 formData.forEach((value, key) => data[key] = value);
 
+                // 3. Render
                 doc.render(data);
 
+                // 4. Output
                 const out = doc.getZip().generate({
                     type: "blob",
                     mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -305,10 +238,12 @@
                 const filename = `Report_${data['Student Name'] || 'Generated'}`;
 
                 if (format === 'docx') {
+                    // --- Case A: Download Word ---
                     saveAs(out, `${filename}.docx`);
                     showNotification("Word document downloaded!");
                 } else {
-                    renderPdfPreview(out);
+                    // --- Case B: Generate PDF (New Method) ---
+                    await generatePDFDirectly(out, filename);
                 }
 
             } catch (error) {
@@ -318,45 +253,42 @@
                     msg = error.properties.errors.map(e => e.properties.explanation).join("\n");
                 }
                 showNotification("Error: " + msg, "error");
+                document.getElementById('loading-overlay').classList.add('hidden');
             }
         }
 
-        // PDF Preview Logic
-        async function renderPdfPreview(blob) {
-            const modal = document.getElementById('pdf-preview-modal');
-            const container = document.getElementById('pdf-render-container');
-            const instruction = document.getElementById('print-instruction');
-            
-            container.innerHTML = '<div class="text-center py-10"><i class="fa-solid fa-spinner fa-spin text-4xl text-blue-500"></i><p class="mt-4">Generating Preview...</p></div>';
-            modal.classList.remove('hidden');
+        // --- NEW: Direct PDF Generator ---
+        async function generatePDFDirectly(docxBlob, filename) {
+            // 1. Show Loading
+            document.getElementById('loading-overlay').classList.remove('hidden');
+            const container = document.getElementById('pdf-generator-container');
+            container.innerHTML = ''; // Clear previous
 
             try {
-                // Using docx-preview
-                const options = { 
-                    className: "docx_viewer", 
-                    inWrapper: false, 
-                    ignoreWidth: false, 
-                    ignoreHeight: false, 
-                    breakPages: true 
+                // 2. Render DOCX to HTML (Hidden Div)
+                const options = { className: "docx_viewer", inWrapper: false, ignoreWidth: false, ignoreHeight: false, breakPages: true };
+                await docx.renderAsync(docxBlob, container, null, options);
+
+                // 3. Convert HTML to PDF using html2pdf.js
+                const opt = {
+                    margin:       10, // mm
+                    filename:     `${filename}.pdf`,
+                    image:        { type: 'jpeg', quality: 0.98 },
+                    html2canvas:  { scale: 2 }, // Higher scale = better quality
+                    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
                 };
-                await docx.renderAsync(blob, container, null, options);
+
+                // 4. Save
+                await html2pdf().set(opt).from(container).save();
                 
-                // Show instruction box after render
-                instruction.classList.remove('hidden');
-                showNotification("Preview generated. Click 'Save as PDF' to finish.");
+                showNotification("PDF Downloaded successfully!");
             } catch (err) {
                 console.error(err);
-                container.innerHTML = '<p class="text-red-500 text-center">Failed to render preview.</p>';
-                showNotification("Preview failed.", "error");
+                showNotification("Failed to generate PDF file.", "error");
+            } finally {
+                // 5. Hide Loading
+                document.getElementById('loading-overlay').classList.add('hidden');
             }
-        }
-
-        function triggerPrint() {
-            window.print();
-        }
-
-        function closePreview() {
-            document.getElementById('pdf-preview-modal').classList.add('hidden');
         }
     </script>
 </body>
